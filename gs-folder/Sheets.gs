@@ -15,6 +15,22 @@ function initSheet() {
   Logger.log('Sheet ready: ' + sheet.getName());
 }
 
+function listCerts(token) {
+  requireToken(token);
+  const sheet = getSheet();
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { certs: [], total: 0 };
+  const headers = data[0];
+  const certs = data.slice(1)
+    .filter(r => r[0]) // skip blank rows
+    .map(r => {
+      const o = {};
+      headers.forEach((h, i) => { o[h] = r[i]; });
+      return o;
+    });
+  return { certs, total: certs.length };
+}
+
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_NAME);
@@ -46,4 +62,12 @@ function appendCertRecord(record) {
   const row = HEADERS.map(h => record[h] !== undefined ? record[h] : '');
   sheet.appendRow(row);
   return row;
+}
+
+function deleteRowByCertId(certId) {
+  const sheet = getSheet();
+  const row = findRowByCertId(certId);
+  if (row === -1) return false;
+  sheet.deleteRow(row);
+  return true;
 }
