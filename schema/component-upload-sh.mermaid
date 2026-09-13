@@ -1,0 +1,39 @@
+graph LR
+    subgraph Frontend ["Frontend (static host)"]
+        IDX["index.html<br/>+ dashboard.js"]
+        ADM["admin.html<br/>+ admin.js"]
+        AUTH["auth.js<br/>(PIN, token, api())"]
+        NAV["nav.js<br/>(shared top nav)"]
+        CFG["config.js"]
+    end
+
+    subgraph Backend ["Apps Script Web App"]
+        CODE["Code.gs<br/>(router + auth)"]
+        SHG["Sheets.gs<br/>(read/append/delete)"]
+        CLG["Cloudinary.gs<br/>(sign + destroy)"]
+        EMG["Email.gs<br/>(registerCert + mailer)"]
+    end
+
+    SHEET[("Google Sheet<br/>Certificates tab")]
+    CLD["Cloudinary<br/>raw/upload · raw/destroy"]
+    GM["Gmail<br/>MailApp.sendEmail"]
+
+    IDX --> AUTH
+    ADM --> AUTH
+    IDX --> NAV
+    ADM --> NAV
+    IDX --> CFG
+    ADM --> CFG
+
+    AUTH -->|POST text/plain<br/>verifyPin · listCerts · deleteCert| CODE
+    ADM -->|POST text/plain<br/>signUpload · registerCert| CODE
+    ADM -->|multipart POST<br/>signed raw upload| CLD
+    CODE --> CLG
+    CODE --> SHG
+    CODE --> EMG
+    SHG --> SHEET
+    CLG -->|raw/upload signature| ADM
+    CLG -->|raw/destroy + signed POST| CLD
+    EMG -.->|on notify=true| GM
+    CLD -->|secure_url · public_id · result| ADM
+    CLD -->|result: ok / not found| CODE

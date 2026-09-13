@@ -1,0 +1,47 @@
+sequenceDiagram
+    autonumber
+    participant U  as Admin
+    participant FE as admin.js
+    participant AU as auth.js
+    participant GS as Apps Script
+    participant CL as Cloudinary
+    participant SH as Sheet
+    participant GM as Gmail
+
+    U  ->> FE: Open admin.html
+    FE ->> AU: requireAuth()
+    alt No token in localStorage
+        U  ->> FE: Enter PIN
+        FE ->> AU: verifyPin(pin)
+        AU ->> GS: POST verifyPin
+        GS -->> AU: token (cached 6h)
+        AU ->> AU: store token in localStorage
+    end
+    AU -->> FE: onReady(token)
+
+    U  ->> FE: Fill form + attach PDF(s)
+    FE ->> GS: POST signUpload (token, folder)
+    GS ->> GS: requireToken()
+    GS -->> FE: signature, timestamp, apiKey, cloudName
+
+    FE ->> CL: POST /raw/upload<br/>file + signature + folder
+    CL -->> FE: secure_url, public_id
+
+    opt Report PDF attached
+        FE ->> GS: POST signUpload (token, reports folder)
+        GS -->> FE: signature
+        FE ->> CL: POST /raw/upload
+        CL -->> FE: secure_url, public_id
+    end
+
+    FE ->> GS: POST registerCert (token, data)
+    GS ->> GS: requireToken()
+    GS ->> SH: findRowByCertId (duplicate guard)
+    GS ->> SH: appendRow
+    GS -->> FE: success { record }
+
+    alt Email provided AND notify checked
+        GS ->> GM: sendEmail(cert URL)
+    end
+
+    FE -->> U: Success screen with live URL
