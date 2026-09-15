@@ -1,9 +1,10 @@
 /**
  * Lingo‑Ville Admin Upload — main router
- * Deploy as: Execute as Me, Access: Anyone
  */
 
 const TOKEN_TTL = 21600; // 6 hours (max for CacheService)
+const LIST_CACHE_KEY = 'list_certs_v1';
+const LIST_CACHE_TTL = 30; // seconds
 
 function doGet(e) {
   try {
@@ -23,9 +24,23 @@ function doGet(e) {
 function getCert(certId) {
   if (!certId) throw new Error('MISSING_CERT_ID');
 
+  const normalized = String(certId).trim().toLowerCase();
+  const cacheKey = 'cert_' + normalized;
+  const cache = CacheService.getScriptCache();
+
+  const hit = cache.get(cacheKey);
+  if (hit) {
+    const parsed = JSON.parse(hit);
+    if (parsed && parsed.__not_found) throw new Error('CERT_NOT_FOUND');
+    return parsed;
+  }
+
   const sheet = getSheet();
   const data = sheet.getDataRange().getValues();
-  if (data.length < 2) throw new Error('CERT_NOT_FOUND');
+  if (data.length < 2) {
+    cache.put(cacheKey, JSON.stringify({ __not_found: true }), 60);
+    throw new Error('CERT_NOT_FOUND');
+  }
 
   const headers = data[0];
   const idx = {
@@ -41,11 +56,10 @@ function getCert(certId) {
   };
   if (idx.CertID === -1) throw new Error('SCHEMA_ERROR');
 
-  const needle = String(certId).trim().toLowerCase();
   for (let i = 1; i < data.length; i++) {
     const rowCertId = String(data[i][idx.CertID] || '').trim().toLowerCase();
-    if (rowCertId === needle) {
-      return {
+    if (rowCertId === normalized) {
+      const result = {
         CertID:      String(data[i][idx.CertID] || ''),
         StudentName: String(data[i][idx.StudentName] || ''),
         Course:      String(data[i][idx.Course] || ''),
@@ -58,8 +72,12 @@ function getCert(certId) {
         ReportURL:   String(data[i][idx.ReportURL] || ''),
         Status:      String(data[i][idx.Status] || 'active').toLowerCase()
       };
+      cache.put(cacheKey, JSON.stringify(result), 300);
+      return result;
     }
   }
+
+  cache.put(cacheKey, JSON.stringify({ __not_found: true }), 60);
   throw new Error('CERT_NOT_FOUND');
 }
 
@@ -79,13 +97,48 @@ function doPost(e) {
 function route(body) {
   const action = body.action;
   switch (action) {
-    case 'verifyPin':     return verifyPin(body.pin);
-    case 'signUpload':    return signUpload(body.token, body.folder);
-    case 'registerCert':  return registerCert(body.token, body.data);
-    case 'listCerts':     return listCerts(body.token);
-    case 'deleteCert':    return deleteCert(body.token, body.certId);
-    default: throw new Error('INVALID_ACTION');
+    case 'verifyPin':
+      return verifyPin(body.pin);
+
+    case 'signUpload':
+      return signUpload(body.token, body.folder);
+
+    case 'registerCert': {
+      const result = registerCert(body.token, body.data);
+      // Bust the list cache so the dashboard sees the new cert immediately.
+      try { CacheService.getScriptCache().remove(LIST_CACHE_KEY); } catch (_) {}
+      return result;
+    }
+
+    case 'listCerts':
+      return listCertsCached(body.token);
+
+    case 'deleteCert': {
+      const result = deleteCert(body.token, body.certId);
+      // Bust both the list cache and the individual cert cache.
+      try { CacheService.getScriptCache().remove(LIST_CACHE_KEY); } catch (_) {}
+      return result;
+    }
+
+    default:
+      throw new Error('INVALID_ACTION');
   }
+}
+
+/**
+ * Cached wrapper around Sheets.gs#listCerts.
+ * 30-second TTL — plenty for a dashboard that a handful of admins refresh.
+ */
+function listCertsCached(token) {
+  requireToken(token);
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(LIST_CACHE_KEY);
+  if (hit) {
+    try { return JSON.parse(hit); } catch (_) { /* fall through */ }
+  }
+  const fresh = listCerts(token);
+  try { cache.put(LIST_CACHE_KEY, JSON.stringify(fresh), LIST_CACHE_TTL); } catch (_) {}
+  return fresh;
 }
 
 function jsonResponse(obj) {
@@ -139,8 +192,6 @@ function deleteCert(token, certId) {
   }
   if (!found) throw new Error('PROFILE_NOT_FOUND');
 
-  // Destroy files first — if this fails, we still want the row gone
-  // so the admin can clean up manually instead of being stuck.
   const certDestroy = found.certPublicId
     ? cloudinaryDestroy(found.certPublicId)
     : { ok: false, result: 'missing-public-id' };
@@ -149,8 +200,10 @@ function deleteCert(token, certId) {
     ? cloudinaryDestroy(found.reportPublicId)
     : { ok: false, result: 'no-report' };
 
-  // Delete the row
   sheet.deleteRow(found.row);
+
+  // Bust the individual cert cache so the public page reflects the deletion.
+  try { CacheService.getScriptCache().remove('cert_' + needle); } catch (_) {}
 
   return {
     certId: needle,
@@ -160,4 +213,10 @@ function deleteCert(token, certId) {
       ? 'Cert file not confirmed deleted on Cloudinary — check manually.'
       : null
   };
+}
+
+/* ---------------- Warm-up ---------------- */
+
+function keepWarm() {
+  return true;
 }

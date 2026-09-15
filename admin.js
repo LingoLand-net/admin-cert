@@ -124,6 +124,8 @@
         }
       });
 
+      try { localStorage.removeItem('lv_certlist_v1'); } catch (_) {}
+
       const liveUrl = CFG.PREVIEW_BASE_URL.replace(/\/$/, '') + '/' + certId;
       showSuccess(liveUrl);
 
