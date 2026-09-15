@@ -2,16 +2,20 @@ graph LR
     subgraph Frontend ["Frontend (static host)"]
         IDX["index.html<br/>+ dashboard.js"]
         ADM["admin.html<br/>+ admin.js"]
+        VER["verify/index.html<br/>+ verify.js"]
         AUTH["auth.js<br/>(PIN, token, api())"]
         NAV["nav.js<br/>(shared top nav)"]
         CFG["config.js"]
+        LS[("localStorage<br/>cert_&lt;id&gt; · lv_certlist_v1<br/>5 min TTL")]
     end
 
     subgraph Backend ["Apps Script Web App"]
-        CODE["Code.gs<br/>(router + auth)"]
+        CODE["Code.gs<br/>(router + auth + getCert)"]
         SHG["Sheets.gs<br/>(read/append/delete)"]
         CLG["Cloudinary.gs<br/>(sign + destroy)"]
         EMG["Email.gs<br/>(registerCert + mailer)"]
+        SC[("ScriptCache<br/>cert_&lt;id&gt; · list_certs_v1<br/>tok_&lt;uuid&gt;")]
+        WARM["keepWarm()<br/>5-min trigger"]
     end
 
     SHEET[("Google Sheet<br/>Certificates tab")]
@@ -25,15 +29,23 @@ graph LR
     IDX --> CFG
     ADM --> CFG
 
+    IDX <-.->|read/write| LS
+    VER <-.->|read/write| LS
+
     AUTH -->|POST text/plain<br/>verifyPin · listCerts · deleteCert| CODE
     ADM -->|POST text/plain<br/>signUpload · registerCert| CODE
     ADM -->|multipart POST<br/>signed raw upload| CLD
+    VER -->|GET ?action=getCert| CODE
+
     CODE --> CLG
     CODE --> SHG
     CODE --> EMG
+    CODE <-.->|read/write + bust on writes| SC
+
     SHG --> SHEET
     CLG -->|raw/upload signature| ADM
     CLG -->|raw/destroy + signed POST| CLD
     EMG -.->|on notify=true| GM
     CLD -->|secure_url · public_id · result| ADM
     CLD -->|result: ok / not found| CODE
+    WARM -.->|keeps runtime alive| CODE

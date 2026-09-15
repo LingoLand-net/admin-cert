@@ -1,9 +1,12 @@
+
 sequenceDiagram
     autonumber
     participant U  as Admin
     participant FE as admin.js
+    participant LS as localStorage
     participant AU as auth.js
     participant GS as Apps Script
+    participant SC as ScriptCache
     participant CL as Cloudinary
     participant SH as Sheet
     participant GM as Gmail
@@ -14,14 +17,16 @@ sequenceDiagram
         U  ->> FE: Enter PIN
         FE ->> AU: verifyPin(pin)
         AU ->> GS: POST verifyPin
-        GS -->> AU: token (cached 6h)
-        AU ->> AU: store token in localStorage
+        GS ->> SC: put tok_<uuid> (6 h)
+        GS -->> AU: token
+        AU ->> LS: store lv_admin_token
     end
     AU -->> FE: onReady(token)
 
     U  ->> FE: Fill form + attach PDF(s)
     FE ->> GS: POST signUpload (token, folder)
-    GS ->> GS: requireToken()
+    GS ->> SC: verify tok_<uuid>
+    SC -->> GS: ok
     GS -->> FE: signature, timestamp, apiKey, cloudName
 
     FE ->> CL: POST /raw/upload<br/>file + signature + folder
@@ -35,13 +40,16 @@ sequenceDiagram
     end
 
     FE ->> GS: POST registerCert (token, data)
-    GS ->> GS: requireToken()
+    GS ->> SC: verify tok_<uuid>
     GS ->> SH: findRowByCertId (duplicate guard)
+    SH -->> GS: not found
     GS ->> SH: appendRow
+    GS ->> SC: remove list_certs_v1
     GS -->> FE: success { record }
 
     alt Email provided AND notify checked
         GS ->> GM: sendEmail(cert URL)
     end
 
+    FE ->> LS: remove lv_certlist_v1
     FE -->> U: Success screen with live URL

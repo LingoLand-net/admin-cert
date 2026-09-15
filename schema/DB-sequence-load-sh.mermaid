@@ -1,0 +1,35 @@
+sequenceDiagram
+    autonumber
+    participant U  as Admin
+    participant FE as dashboard.js
+    participant LS as localStorage
+    participant AU as auth.js
+    participant GS as Apps Script
+    participant SC as ScriptCache
+    participant SH as Sheet
+
+    U  ->> FE: Open index.html
+    FE ->> AU: requireAuth()
+    AU -->> FE: onReady(token)
+
+    FE ->> LS: read lv_certlist_v1
+    alt Cache hit (< 5 min)
+        LS -->> FE: cached certs[]
+        FE -->> U: Table rendered instantly
+        FE ->> GS: POST listCerts (background refresh)
+    else Cache miss
+        FE -->> U: "Loading…" placeholder
+        FE ->> GS: POST listCerts (token)
+    end
+
+    GS ->> SC: get list_certs_v1
+    alt Server cache hit (< 30 s)
+        SC -->> GS: cached { certs[] }
+    else Server cache miss
+        GS ->> SH: getDataRange().getValues()
+        SH -->> GS: rows
+        GS ->> SC: put list_certs_v1 (30 s)
+    end
+    GS -->> FE: { certs[] }
+    FE ->> LS: write lv_certlist_v1 (5 min)
+    FE -->> U: Table re-rendered

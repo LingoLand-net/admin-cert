@@ -2,26 +2,23 @@ sequenceDiagram
     autonumber
     participant U  as Admin
     participant FE as dashboard.js
-    participant AU as auth.js
+    participant LS as localStorage
     participant GS as Apps Script
+    participant SC as ScriptCache
     participant CL as Cloudinary
     participant SH as Sheet
-
-    U  ->> FE: Open index.html
-    FE ->> AU: requireAuth()
-    AU -->> FE: onReady(token)
-    FE ->> GS: POST listCerts (token)
-    GS ->> SH: getDataRange().getValues()
-    SH -->> GS: rows
-    GS -->> FE: { certs[] }
-    FE -->> U: Table rendered
 
     U  ->> FE: Click Delete on a row
     FE ->> U: Confirm dialog<br/>(warns: removes row + files)
     U  -->> FE: Confirm
 
+    FE ->> FE: splice row from allCerts[]
+    FE ->> LS: remove lv_certlist_v1
+    FE -->> U: Row disappears immediately
+
     FE ->> GS: POST deleteCert (token, certId)
-    GS ->> GS: requireToken()
+    GS ->> SC: verify tok_<uuid>
+    SC -->> GS: ok
     GS ->> SH: find row by CertID
     SH -->> GS: row, CertPublicID, ReportPublicID
 
@@ -36,8 +33,17 @@ sequenceDiagram
     end
 
     GS ->> SH: deleteRow
+    GS ->> SC: remove cert_<id>
+    GS ->> SC: remove list_certs_v1
     GS -->> FE: { certId, certFile, reportFile, warning? }
-    FE ->> FE: If warning → window.alert()
-    FE ->> GS: POST listCerts (refresh)
-    GS -->> FE: updated { certs[] }
-    FE -->> U: Table re-rendered, row gone
+
+    alt warning present
+        FE -->> U: window.alert(warning)
+    end
+
+    FE ->> GS: POST listCerts (silent refresh)
+    GS -->> FE: fresh { certs[] }
+    FE ->> LS: write lv_certlist_v1
+    FE -->> U: Table matches server
+
+    Note over FE,U: On API error → row is restored, alert shown
